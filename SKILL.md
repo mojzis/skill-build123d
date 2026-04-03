@@ -5,7 +5,7 @@ description: Use this skill when the user wants to create 3D CAD models, parts, 
 
 # build123d — Python CAD Modeling
 
-build123d is a Python BREP CAD library on OpenCascade. Install: `pip install build123d`.
+build123d is a Python BREP CAD library on OpenCascade. Install: `uv add build123d b3d-validate`.
 
 This skill uses **algebra mode** exclusively — shapes are values, combined with Python operators. No context managers, no implicit state.
 
@@ -15,6 +15,9 @@ Always start from this skeleton:
 
 ```python
 from build123d import *
+from b3d_validate import full_check
+from datetime import datetime
+from pathlib import Path
 
 # --- Parameters ---
 width = 60
@@ -26,12 +29,43 @@ hole_radius = 4
 part = Box(width, height, thickness)
 part -= Cylinder(hole_radius, thickness)
 
+# --- Validate ---
+report = full_check(part)
+print(report)
+
 # --- Export ---
-export_step(part, "output.step")
-export_stl(part, "output.stl")
+script_name = Path(__file__).stem
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+steps_dir = Path("steps")
+steps_dir.mkdir(exist_ok=True)
+step_path = steps_dir / f"{script_name}_{timestamp}.step"
+export_step(part, str(step_path))
+print(f"Exported: {step_path}")
 ```
 
-Every script must end with `export_step()` and/or `export_stl()` so the result is viewable.
+Every script must validate then export. If `full_check()` reports geometry errors, **fix the model before exporting**. Printability warnings are informational — export can proceed, but address them if the part is meant for manufacturing.
+
+The STEP file goes to `steps/` using the naming convention `{script_name}_{timestamp}.step`, allowing comparison across iterations.
+
+## Validation & Preview Workflow
+
+Every build script includes a `full_check(part)` call that validates geometry and printability **before** export. The workflow is:
+
+1. **Run the script.** Check the `full_check()` output in stdout.
+2. **If geometry errors** (verdict is not "READY TO PRINT" or "GEOMETRY OK"): fix the model and re-run. Do **not** export or preview broken geometry.
+3. **If validation passes**, the script exports the STEP file. Then generate a visual preview:
+
+```bash
+python scripts/render_preview.py steps/<exported>.step -o previews --composite --prefix <script_name>_<timestamp>
+```
+
+This renders multi-view wireframe PNGs into the `previews/` directory. The `--composite` flag creates a single labeled grid image for quick review.
+
+4. **Read the composite image** to visually verify the model matches the user's intent. If the geometry looks wrong, iterate on the script before presenting the result.
+
+Both directories serve as a timeline:
+- `steps/` — STEP file history, one per build run, for comparison and rollback
+- `previews/` — visual snapshots matching each STEP export
 
 ## How It Works
 
@@ -148,9 +182,11 @@ For external parts: `motor = import_step("nema17.step")`
 7. **Close your wires.** For `make_face()`, the wire must form a closed loop. Last point must connect back to first.
 8. **Align controls origin.** Default is `Align.CENTER` on all axes. Use `align=(Align.CENTER, Align.CENTER, Align.MIN)` to sit a box on the XY plane.
 9. **OpenCascade can fail.** If an operation produces weird results or errors, try a different construction strategy (e.g., loft instead of sweep, split the operation into smaller steps).
-10. **Always export.** End every script with `export_step()` or `export_stl()`.
+10. **Always validate + export + preview.** Every script must call `full_check(part)` before exporting. Fix geometry errors before proceeding. Then export to `steps/` and run `render_preview.py` to verify visually.
 
 ## Reference Files
 
 - **`references/examples.md`** — Full code examples for every pattern: booleans, extrude, revolve, sweep, loft, selectors, patterns, shell, composition, import/export. **Read this first when writing a part.**
 - **`references/api_catalogue.md`** — Constructor signatures for every shape, operation, and geometry class. **Search this when you need exact parameter names/types/defaults.**
+- **`b3d_validate`** — Validation library. `full_check(part)` validates geometry and printability in one call. Use `validate_geometry(part)` or `validate_printability(part, process="fdm")` individually for targeted checks.
+- **`scripts/render_preview.py`** — Headless multi-view wireframe renderer. Converts STEP → PNG previews. Use after every export to visually verify the model.
