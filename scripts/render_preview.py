@@ -2,9 +2,9 @@
 """
 render_preview.py — Headless multi-view wireframe renderer for build123d models.
 
-Takes a STEP file, projects it from multiple angles using build123d's
-project_to_viewport() with OpenCascade hidden-line removal, exports
-intermediate SVGs, and converts to token-optimized PNGs via cairosvg.
+Takes a STEP file, projects it from multiple angles using b3d_validate's
+rendering module (which handles SVG projection, degenerate arc patching,
+and safe shape export), converts to token-optimized PNGs via cairosvg.
 
 Usage:
     python render_preview.py model.step
@@ -12,7 +12,7 @@ Usage:
     python render_preview.py model.step --views front top iso
     python render_preview.py model.step --composite  # 2x2 grid image
 
-Dependencies: build123d, cairosvg
+Dependencies: build123d, b3d-validate, cairosvg
 Optional:     Pillow (for composite grid; graceful fallback if absent)
 
 Part of the Claude × build123d skill toolkit.
@@ -22,86 +22,10 @@ from __future__ import annotations
 
 import argparse
 import math
-import sys
-import tempfile
 import time
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# View definitions
-# Each view: (viewport_origin, viewport_up, label)
-# Origins are normalised to unit vectors internally; magnitude doesn't matter
-# but larger values avoid near-plane clipping on big models.
-# ---------------------------------------------------------------------------
-
-VIEWS: dict[str, tuple[tuple[float, float, float], tuple[float, float, float], str]] = {
-    "front": ((0, -1, 0),    (0, 0, 1), "Front"),
-    "back":  ((0, 1, 0),     (0, 0, 1), "Back"),
-    "right": ((1, 0, 0),     (0, 0, 1), "Right"),
-    "left":  ((-1, 0, 0),    (0, 0, 1), "Left"),
-    "top":   ((0, 0, 1),     (0, 1, 0), "Top"),
-    "bottom":((0, 0, -1),    (0, -1, 0), "Bottom"),
-    "iso":   ((-1, -1, 0.8), (0, 0, 1), "Iso"),
-}
-
-DEFAULT_VIEWS = ["front", "top", "right", "iso"]
-
-# ---------------------------------------------------------------------------
-# SVG generation via build123d
-# ---------------------------------------------------------------------------
-
-def _normalise(v: tuple[float, float, float], scale: float = 100) -> tuple[float, float, float]:
-    """Scale a direction vector to a fixed magnitude (keeps it far from origin)."""
-    mag = math.sqrt(sum(c * c for c in v))
-    if mag < 1e-9:
-        return (0.0, 0.0, scale)
-    return tuple(c / mag * scale for c in v)  # type: ignore[return-value]
-
-
-def render_svg(
-    part,
-    view_name: str,
-    output_path: Path,
-    *,
-    line_weight_visible: float = 0.5,
-    line_weight_hidden: float = 0.2,
-) -> Path:
-    """
-    Project *part* from the named view and write an SVG.
-
-    Returns the Path to the written file.
-    """
-    from build123d import Compound, ExportSVG, LineType
-
-    origin_dir, up, _label = VIEWS[view_name]
-    origin = _normalise(origin_dir, scale=500)
-
-    visible, hidden = part.project_to_viewport(origin, viewport_up=up)
-
-    all_edges = visible + hidden
-    if not all_edges:
-        raise RuntimeError(f"No edges produced for view '{view_name}' — model may be empty")
-
-    bb = Compound(children=all_edges).bounding_box()
-    # Projected edges live in the XY plane — use 2D extent for scaling
-    max_dim = max(bb.size.X, bb.size.Y)
-    if max_dim < 1e-9:
-        max_dim = 1.0
-
-    # scale maps model units → SVG user units; target ~100 units wide with padding
-    svg = ExportSVG(scale=90 / max_dim, precision=2)
-    svg.add_layer("Visible", line_weight=line_weight_visible)
-    svg.add_layer(
-        "Hidden",
-        line_color=(180, 180, 180),
-        line_type=LineType.ISO_DOT,
-        line_weight=line_weight_hidden,
-    )
-    svg.add_shape(visible, layer="Visible")
-    svg.add_shape(hidden, layer="Hidden")
-    svg.write(str(output_path))
-    return output_path
-
+from b3d_validate.rendering import render_svg, render_views, VIEWS, DEFAULT_VIEWS
 
 # ---------------------------------------------------------------------------
 # SVG → PNG via cairosvg
