@@ -19,6 +19,7 @@ All examples use `from build123d import *`. All use algebra mode exclusively.
 14. Part Composition (Multi-file)
 15. Import & Export
 16. Topology Quick Reference
+17. Figure from Sketch
 
 ---
 
@@ -386,4 +387,140 @@ Key type aliases:
 - `Part` = `Compound` containing `Solid`(s) — result of 3D operations
 - `Sketch` = `Compound` containing `Face`(s) — result of 2D operations
 - `Curve` = `Compound` containing `Edge`(s) — result of 1D operations
+
+## 17. Figure from Sketch
+
+End-to-end example of the Figure & Assembly Workflow described in
+`SKILL.md`. The target is a snowman: body, head, nose. The flow is
+**sketch → manifest → decompose → orient → build → preview → STL**.
+
+### Step 1 — Draft the SVG sketch
+
+Save as `sketches/snowman.svg`:
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 320" width="200" height="320">
+  <!-- body -->
+  <circle cx="100" cy="220" r="60" fill="#eef" stroke="#888" stroke-width="2"/>
+  <!-- head -->
+  <circle cx="100" cy="115" r="36" fill="#eef" stroke="#888" stroke-width="2"/>
+  <!-- nose (carrot) -->
+  <polygon points="100,115 116,118 100,123" fill="#f80" stroke="#888" stroke-width="1"/>
+</svg>
+```
+
+### Step 2 — Rasterize and look
+
+```bash
+python scripts/sketch_to_png.py sketches/snowman.svg
+```
+
+Open `sketches/snowman.png` and confirm the silhouette before continuing.
+
+### Step 3 — Write the parts manifest
+
+Save as `sketches/snowman.parts.md`:
+
+```markdown
+# snowman — parts manifest
+Sketch: sketches/snowman.svg
+Front-facing axis: -Y
+Up axis: +Z
+
+## body
+shape: Sphere
+dimensions: r=30
+anchor: (0, 0, 30)
+connects to: head (top)
+notes: sits on Z=0
+
+## head
+shape: Sphere
+dimensions: r=18
+anchor: (0, 0, 30 + 30 + 18*0.9)
+connects to: body, nose
+notes: 0.9 overlap with body = blended seam
+
+## nose
+shape: Cone
+dimensions: r1=2, r2=0, h=8
+anchor: (0, -18*0.9, head_z)
+connects to: head (front)
+notes: points -Y
+```
+
+### Step 4–6 — Build the figure
+
+Save as `snowman.py`:
+
+```python
+from build123d import *
+from b3d_validate import full_check
+from datetime import datetime
+from pathlib import Path
+
+# --- Parameters (mirror the manifest) ---
+body_r = 30
+head_r = 18
+overlap = 0.9              # head sinks 10% into body for a blended seam
+nose_r, nose_h = 2, 8
+
+body_z = body_r            # body sits on Z=0
+head_z = body_z + body_r + head_r * overlap
+
+# --- Part functions (one per manifest row) ---
+def make_body() -> Part:
+    return Pos(0, 0, body_z) * Sphere(body_r)
+
+def make_head() -> Part:
+    return Pos(0, 0, head_z) * Sphere(head_r)
+
+def make_nose() -> Part:
+    # Nose points along -Y (the front-facing axis). Cone's default axis
+    # is +Z, so rotate +90° about X to lay it pointing toward -Y.
+    cone = Rot(90, 0, 0) * Cone(nose_r, 0, nose_h)
+    # Anchor on the front of the head (y = -head_r * overlap pulls it
+    # slightly into the head so the union blends).
+    return Pos(0, -head_r * overlap, head_z) * cone
+
+# --- Assembly (figure faces -Y) ---
+snowman = make_body() + make_head() + make_nose()
+
+# --- Validate ---
+report = full_check(snowman)
+print(report)
+
+# --- Export STEP + STL ---
+script_name = Path(__file__).stem
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+steps_dir = Path("steps")
+steps_dir.mkdir(exist_ok=True)
+step_path = steps_dir / f"{script_name}_{timestamp}.step"
+export_step(snowman, str(step_path))
+print(f"Exported: {step_path}")
+
+stls_dir = Path("stls")
+stls_dir.mkdir(exist_ok=True)
+stl_path = stls_dir / f"{script_name}_{timestamp}.stl"
+try:
+    export_stl(snowman, str(stl_path))
+    print(f"Exported: {stl_path}")
+except Exception as e:
+    print(f"STL export skipped: {e}")
+```
+
+### Step 7 — Preview and review joints
+
+```bash
+python scripts/render_preview.py steps/snowman_<timestamp>.step \
+    -o previews --composite --prefix snowman_<timestamp>
+```
+
+Open the composite. Check:
+- **Front view shows the carrot nose pointing toward the viewer** (figure faces -Y; the cone tip appears as a small dot in the centre of the head).
+- The head/body seam is a smooth blend, not a sharp circle (the `0.9` overlap factor).
+- The nose meets the head cleanly.
+
+If the nose is on the back of the head, wrap the assembly in `Rot(0, 0, 180)` and re-export. If the head/body seam still looks sharp, lower the `overlap` factor (e.g. `0.85`) so they merge more, or `fillet` the boundary edges.
 - `Rot` = `Rotation` (shorthand alias)
