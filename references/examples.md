@@ -424,13 +424,29 @@ Save as `sketches/snowman.parts.md`:
 ```markdown
 # snowman — parts manifest
 Sketch: sketches/snowman.svg
-Front-facing axis: -Y   ·   Up axis: +Z
+Front-facing axis: -Y
+Up axis: +Z
 
-| part | shape  | dimensions    | anchor (x,y,z)            | connects to  | notes               |
-|------|--------|---------------|---------------------------|--------------|---------------------|
-| body | Sphere | r=30          | (0, 0, 30)                | head (top)   | sits on Z=0         |
-| head | Sphere | r=18          | (0, 0, 30 + 30 + 18*0.9)  | body, nose   | 0.9 overlap = blend |
-| nose | Cone   | r1=2,r2=0,h=8 | (0, -18*0.9, head_z)      | head (front) | points -Y           |
+## body
+shape: Sphere
+dimensions: r=30
+anchor: (0, 0, 30)
+connects to: head (top)
+notes: sits on Z=0
+
+## head
+shape: Sphere
+dimensions: r=18
+anchor: (0, 0, 30 + 30 + 18*0.9)
+connects to: body, nose
+notes: 0.9 overlap with body = blended seam
+
+## nose
+shape: Cone
+dimensions: r1=2, r2=0, h=8
+anchor: (0, -18*0.9, head_z)
+connects to: head (front)
+notes: points -Y
 ```
 
 ### Step 4–6 — Build the figure
